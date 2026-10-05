@@ -14,7 +14,8 @@ import {
   MY_CONTACTS
 } from '../lib/contacts';
 import { AuthExpiredError, googleSignIn, logout } from '../lib/auth';
-import { RefreshCw, CheckCircle, Edit3, Trash2, Sparkles, Loader2, Users, Smartphone, AlertTriangle } from 'lucide-react';
+import { RefreshCw, CheckCircle, Edit3, Trash2, Sparkles, Loader2, Users, Smartphone, AlertTriangle, MessageCircle } from 'lucide-react';
+import { whatsAppUrl } from '../lib/phone';
 import SwipeCardDeck from './SwipeCardDeck';
 
 const ContactsChart = lazy(() => import('./ContactsChart'));
@@ -614,7 +615,21 @@ export default function PhoneContacts() {
                       {currentContact.firstName?.[0] || currentContact.lastName?.[0] || '?'}
                       </div>
                       <h3 className="text-3xl font-bold text-slate-800 mb-2">{currentContact.firstName} {currentContact.lastName}</h3>
-                      <div className="text-lg text-slate-500 mb-1 font-mono" dir="ltr">{currentContact.phone || 'אין מספר טלפון'}</div>
+                      {currentContact.phone && whatsAppUrl(currentContact.phone) ? (
+                          <a
+                              href={whatsAppUrl(currentContact.phone)!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="פתח צ'אט בוואטסאפ כדי לזהות את איש הקשר"
+                              className="inline-flex items-center gap-2 text-lg text-slate-600 mb-1 font-mono bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 px-3 py-1 rounded-xl transition"
+                              dir="ltr"
+                          >
+                              {currentContact.phone}
+                              <MessageCircle className="w-4 h-4 text-emerald-600" />
+                          </a>
+                      ) : (
+                          <div className="text-lg text-slate-500 mb-1 font-mono" dir="ltr">{currentContact.phone || 'אין מספר טלפון'}</div>
+                      )}
                       <div className="text-slate-400 font-mono text-sm" dir="ltr">{currentContact.email || 'אין אימייל'}</div>
                   </div>
 

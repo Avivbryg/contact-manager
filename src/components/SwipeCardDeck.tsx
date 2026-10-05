@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate } from 'motion/react';
 import { GoogleContact, ContactGroup } from '../lib/contacts';
-import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Smartphone, Save } from 'lucide-react';
+import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Smartphone, Save, MessageCircle } from 'lucide-react';
+import { whatsAppUrl } from '../lib/phone';
 
 interface SwipeCardDeckProps {
   currentContact: GoogleContact;
@@ -160,6 +161,7 @@ export default function SwipeCardDeck({
 
   const fullName = `${currentContact.firstName || ''} ${currentContact.lastName || ''}`.trim() || 'איש קשר ללא שם';
   const initial = currentContact.firstName?.[0] || currentContact.lastName?.[0] || '?';
+  const whatsAppLink = currentContact.phone ? whatsAppUrl(currentContact.phone) : null;
 
   return (
     <div className="flex-1 flex flex-col justify-between items-center w-full max-w-sm mx-auto select-none">
@@ -284,10 +286,28 @@ export default function SwipeCardDeck({
 
             <div className="space-y-1.5 w-full max-w-[260px]">
               {currentContact.phone ? (
-                <div className="flex items-center justify-center gap-2 text-slate-700 bg-slate-50 py-1.5 px-3 rounded-xl text-base font-mono font-medium" dir="ltr">
-                  <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span className="truncate">{currentContact.phone}</span>
-                </div>
+                whatsAppLink ? (
+                  <a
+                    href={whatsAppLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    draggable={false}
+                    // A drag that ends over the number must not open WhatsApp
+                    onClick={e => { if (Math.abs(x.get()) > 5 || Math.abs(y.get()) > 5) e.preventDefault(); }}
+                    title="פתח צ'אט בוואטסאפ כדי לזהות את איש הקשר"
+                    className="flex items-center justify-center gap-2 text-slate-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 py-1.5 px-3 rounded-xl text-base font-mono font-medium transition"
+                    dir="ltr"
+                  >
+                    <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="truncate">{currentContact.phone}</span>
+                    <MessageCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  </a>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 text-slate-700 bg-slate-50 py-1.5 px-3 rounded-xl text-base font-mono font-medium" dir="ltr">
+                    <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="truncate">{currentContact.phone}</span>
+                  </div>
+                )
               ) : (
                 <div className="text-xs text-slate-400 italic">אין מספר טלפון</div>
               )}
