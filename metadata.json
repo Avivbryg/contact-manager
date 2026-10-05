@@ -1,0 +1,8 @@
+{
+  "name": "Contact manager ",
+  "description": "Edit your contacts easily ",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
