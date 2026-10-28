@@ -21,6 +21,8 @@ export interface GoogleContact {
   lastName: string;
   phone: string;
   email: string;
+  // Google Contacts "Notes" field (the first biography)
+  note: string;
   memberships: string[];
   // Original People API fields, kept so updates don't drop data we don't display
   raw: {
@@ -35,6 +37,7 @@ export interface ContactEdit {
   lastName?: string;
   phone?: string;
   email?: string;
+  note?: string;
 }
 
 const toContactGroup = (group: any): ContactGroup => ({
@@ -75,11 +78,34 @@ export async function createContactGroup(name: string): Promise<ContactGroup> {
   return toContactGroup(await res.json());
 }
 
+const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,memberships,biographies';
+
+const toGoogleContact = (person: any): GoogleContact => {
+  const nameObj = person.names?.[0] || {};
+  return {
+    resourceName: person.resourceName,
+    etag: person.etag,
+    firstName: nameObj.givenName || nameObj.unstructuredName || '',
+    lastName: nameObj.familyName || '',
+    phone: person.phoneNumbers?.[0]?.value || '',
+    email: person.emailAddresses?.[0]?.value || '',
+    note: person.biographies?.[0]?.value || '',
+    memberships: (person.memberships || [])
+      .filter((m: any) => m.contactGroupMembership)
+      .map((m: any) => m.contactGroupMembership.contactGroupResourceName),
+    raw: {
+      names: person.names || [],
+      phoneNumbers: person.phoneNumbers || [],
+      emailAddresses: person.emailAddresses || []
+    }
+  };
+};
+
 export async function getContacts(): Promise<GoogleContact[]> {
   let allConnections: any[] = [];
   let nextPageToken = '';
   do {
-    const url = `${API}/people/me/connections?personFields=names,emailAddresses,phoneNumbers,memberships&pageSize=1000${nextPageToken ? `&pageToken=${encodeURIComponent(nextPageToken)}` : ''}`;
+    const url = `${API}/people/me/connections?personFields=${PERSON_FIELDS}&pageSize=1000${nextPageToken ? `&pageToken=${encodeURIComponent(nextPageToken)}` : ''}`;
     const res = await fetchWithToken(url);
     if (!res.ok) throw await errorWithBody(res, 'Failed to fetch contacts');
     const data = await res.json();
@@ -89,25 +115,14 @@ export async function getContacts(): Promise<GoogleContact[]> {
     nextPageToken = data.nextPageToken || '';
   } while (nextPageToken);
 
-  return allConnections.map(person => {
-    const nameObj = person.names?.[0] || {};
-    return {
-      resourceName: person.resourceName,
-      etag: person.etag,
-      firstName: nameObj.givenName || nameObj.unstructuredName || '',
-      lastName: nameObj.familyName || '',
-      phone: person.phoneNumbers?.[0]?.value || '',
-      email: person.emailAddresses?.[0]?.value || '',
-      memberships: (person.memberships || [])
-        .filter((m: any) => m.contactGroupMembership)
-        .map((m: any) => m.contactGroupMembership.contactGroupResourceName),
-      raw: {
-        names: person.names || [],
-        phoneNumbers: person.phoneNumbers || [],
-        emailAddresses: person.emailAddresses || []
-      }
-    };
-  });
+  return allConnections.map(toGoogleContact);
+}
+
+/** Fetches one contact fresh, so queued edits always apply against the current etag and data. */
+export async function getContact(resourceName: string): Promise<GoogleContact> {
+  const res = await fetchWithToken(`${API}/${resourceName}?personFields=${PERSON_FIELDS}`);
+  if (!res.ok) throw await errorWithBody(res, 'Failed to fetch contact');
+  return toGoogleContact(await res.json());
 }
 
 const pick = (obj: any, keys: string[]) =>
@@ -131,6 +146,7 @@ export function buildContactUpdate(contact: GoogleContact, edit: ContactEdit) {
   const lastName = (edit.lastName ?? contact.lastName).trim();
   const phone = (edit.phone ?? contact.phone).trim();
   const email = (edit.email ?? contact.email).trim();
+  const note = (edit.note ?? contact.note).trim();
 
   const body: Record<string, unknown> = { etag: contact.etag };
   const fields: string[] = [];
@@ -147,6 +163,10 @@ export function buildContactUpdate(contact: GoogleContact, edit: ContactEdit) {
   if (email !== contact.email) {
     body.emailAddresses = replaceFirstEntry(contact.raw.emailAddresses, email, ['value', 'type', 'displayName']);
     fields.push('emailAddresses');
+  }
+  if (note !== contact.note) {
+    body.biographies = note ? [{ value: note, contentType: 'TEXT_PLAIN' }] : [];
+    fields.push('biographies');
   }
 
   return { body, updatePersonFields: fields.join(',') };

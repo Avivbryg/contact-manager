@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { motion, useMotionValue, useTransform, animate } from 'motion/react';
+import { motion, useMotionValue, useTransform, animate, MotionValue } from 'motion/react';
 import { GoogleContact, ContactGroup } from '../lib/contacts';
-import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Smartphone, Save, MessageCircle } from 'lucide-react';
+import { Stage } from '../lib/session';
+import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Package, MessageCircle, StickyNote } from 'lucide-react';
 import { whatsAppUrl } from '../lib/phone';
 
 interface SwipeCardDeckProps {
@@ -10,13 +11,24 @@ interface SwipeCardDeckProps {
   currentIndex: number;
   totalCount: number;
   contactGroups: ContactGroup[];
-  onApprove: () => void;
+  stage: Stage;
+  onOk: () => void;
   onEdit: () => void;
+  onBox: () => void;
   onDelete: () => void;
-  onSaveAndExit?: () => void;
   onUndo?: () => void;
   canUndo?: boolean;
+  onWhatsAppOpen?: () => void;
 }
+
+// What right/down mean depends on the stage: in Unboxing the contact is already in the box
+export const STAGE_LABELS: Record<Stage, { ok: string; box: string }> = {
+  sorting: { ok: 'תקין', box: 'לקופסה' },
+  unboxing: { ok: 'זיהיתי, הוצא', box: 'נשאר בקופסה' },
+};
+
+const FLY_DISTANCE = 600;
+const FLY = { duration: 0.22, ease: 'easeOut' } as const;
 
 export default function SwipeCardDeck({
   currentContact,
@@ -24,24 +36,23 @@ export default function SwipeCardDeck({
   currentIndex,
   totalCount,
   contactGroups,
-  onApprove,
+  stage,
+  onOk,
   onEdit,
+  onBox,
   onDelete,
-  onSaveAndExit,
   onUndo,
   canUndo = false,
+  onWhatsAppOpen,
 }: SwipeCardDeckProps) {
   const [isAnimatingOut, setIsAnimatingOut] = useState(false);
+  const labels = STAGE_LABELS[stage];
 
   const x = useMotionValue(0);
   const y = useMotionValue(0);
   const rotate = useTransform(x, [-250, 250], [-18, 18]);
 
-  // Opacities for the swipe stamps:
-  // Right = Valid/Approve ("תקין")
-  // Left = Edit ("לתקן")
-  // Down = Delete ("למחוק")
-  // Up = Save and Exit ("שמור שינויים ויציאה")
+  // Stamp opacities: right = OK, left = edit, down = box, up = delete
   const rightStampOpacity = useTransform(x, [30, 110], [0, 1]);
   const leftStampOpacity = useTransform(x, [-30, -110], [0, 1]);
   const downStampOpacity = useTransform(y, [40, 120], [0, 1]);
@@ -51,112 +62,45 @@ export default function SwipeCardDeck({
   const nextCardScale = useTransform(x, [-200, 0, 200], [0.98, 0.94, 0.98]);
   const nextCardOpacity = useTransform(x, [-200, 0, 200], [0.9, 0.6, 0.9]);
 
-  const handleDragEnd = async (_: any, info: { offset: { x: number; y: number }; velocity: { x: number; y: number } }) => {
+  /** Animates the card off screen along one axis, then runs the action. */
+  const flyOut = async (axis: MotionValue<number>, to: number, action: () => void, vibrateMs = 15) => {
+    if (isAnimatingOut) return;
+    setIsAnimatingOut(true);
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(vibrateMs);
+    await animate(axis, to, FLY);
+    action();
+    x.set(0);
+    y.set(0);
+    setIsAnimatingOut(false);
+  };
+
+  const triggerOk = () => flyOut(x, FLY_DISTANCE, onOk);
+  const triggerEdit = () => flyOut(x, -FLY_DISTANCE, onEdit);
+  const triggerBox = () => flyOut(y, FLY_DISTANCE, onBox, 20);
+  const triggerDelete = () => flyOut(y, -FLY_DISTANCE, onDelete, 30);
+
+  const handleDragEnd = (_: any, info: { offset: { x: number; y: number }; velocity: { x: number; y: number } }) => {
     if (isAnimatingOut) return;
 
     const { offset, velocity } = info;
     const isDominantY = Math.abs(offset.y) > Math.abs(offset.x) * 1.15;
 
-    // Swipe Up -> Save and Exit (שמור שינויים שבוצעו ויציאה)
-    if (isDominantY && (offset.y < -90 || velocity.y < -400)) {
-      setIsAnimatingOut(true);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(20);
-      await animate(y, -600, { duration: 0.22, ease: 'easeOut' });
-      if (onSaveAndExit) onSaveAndExit();
-      y.set(0);
-      x.set(0);
-      setIsAnimatingOut(false);
-      return;
-    }
-
-    // Swipe Down -> Delete
-    if (isDominantY && (offset.y > 90 || velocity.y > 400)) {
-      setIsAnimatingOut(true);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(20);
-      await animate(y, 600, { duration: 0.22, ease: 'easeOut' });
-      onDelete();
-      y.set(0);
-      x.set(0);
-      setIsAnimatingOut(false);
-      return;
-    }
-
-    // Swipe Right -> Approve / Valid (תקין)
-    if (offset.x > 85 || velocity.x > 350) {
-      setIsAnimatingOut(true);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15);
-      await animate(x, 600, { duration: 0.22, ease: 'easeOut' });
-      onApprove();
-      x.set(0);
-      y.set(0);
-      setIsAnimatingOut(false);
-      return;
-    }
-
-    // Swipe Left -> Edit (לתקן)
-    if (offset.x < -85 || velocity.x < -350) {
-      setIsAnimatingOut(true);
-      if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15);
-      await animate(x, -600, { duration: 0.22, ease: 'easeOut' });
-      onEdit();
-      x.set(0);
-      y.set(0);
-      setIsAnimatingOut(false);
-      return;
-    }
+    if (isDominantY && (offset.y < -90 || velocity.y < -400)) return triggerDelete();
+    if (isDominantY && (offset.y > 90 || velocity.y > 400)) return triggerBox();
+    if (offset.x > 85 || velocity.x > 350) return triggerOk();
+    if (offset.x < -85 || velocity.x < -350) return triggerEdit();
 
     // Spring back to center
     animate(x, 0, { type: 'spring', stiffness: 350, damping: 25 });
     animate(y, 0, { type: 'spring', stiffness: 350, damping: 25 });
   };
 
-  const triggerApprove = async () => {
-    if (isAnimatingOut) return;
-    setIsAnimatingOut(true);
-    await animate(x, 600, { duration: 0.22, ease: 'easeOut' });
-    onApprove();
-    x.set(0);
-    y.set(0);
-    setIsAnimatingOut(false);
-  };
-
-  const triggerEdit = async () => {
-    if (isAnimatingOut) return;
-    setIsAnimatingOut(true);
-    await animate(x, -600, { duration: 0.22, ease: 'easeOut' });
-    onEdit();
-    x.set(0);
-    y.set(0);
-    setIsAnimatingOut(false);
-  };
-
-  const triggerDelete = async () => {
-    if (isAnimatingOut) return;
-    setIsAnimatingOut(true);
-    await animate(y, 600, { duration: 0.22, ease: 'easeOut' });
-    onDelete();
-    y.set(0);
-    x.set(0);
-    setIsAnimatingOut(false);
-  };
-
-  const triggerSaveAndExit = async () => {
-    if (isAnimatingOut || !onSaveAndExit) return;
-    setIsAnimatingOut(true);
-    await animate(y, -600, { duration: 0.22, ease: 'easeOut' });
-    onSaveAndExit();
-    y.set(0);
-    x.set(0);
-    setIsAnimatingOut(false);
-  };
-
-  // Get current contact's user-visible group names
+  // User-created labels only; system groups like "My Contacts" say nothing about the person
   const getGroupNames = (contact: GoogleContact) => {
-    const userGroups = contact.memberships?.map(m => {
-      const g = contactGroups.find(cg => cg.resourceName === m);
-      return g ? g.formattedName : null;
-    }).filter(Boolean) as string[] || [];
-    return userGroups.length > 0 ? userGroups.join(', ') : 'ללא שיוך';
+    const names = contact.memberships
+      .map(m => contactGroups.find(cg => cg.resourceName === m && cg.groupType === 'USER_CONTACT_GROUP')?.formattedName)
+      .filter(Boolean);
+    return names.length > 0 ? names.join(', ') : 'ללא תווית';
   };
 
   const fullName = `${currentContact.firstName || ''} ${currentContact.lastName || ''}`.trim() || 'איש קשר ללא שם';
@@ -168,20 +112,20 @@ export default function SwipeCardDeck({
       {/* Swipe Direction Quick Hint Bar */}
       <div className="w-full bg-slate-900/5 border border-slate-200/80 rounded-2xl py-2 px-2.5 mb-2.5 text-center">
         <div className="grid grid-cols-4 gap-1 text-[11px] font-semibold text-slate-700">
-          <span className="flex items-center justify-center gap-0.5 text-indigo-700">
-            <span>☝️</span>
-            <span>שמור וצא</span>
-          </span>
           <span className="flex items-center justify-center gap-0.5 text-emerald-700">
             <span>👉</span>
-            <span>תקין</span>
+            <span>{labels.ok}</span>
           </span>
           <span className="flex items-center justify-center gap-0.5 text-blue-700">
             <span>👈</span>
             <span>לתקן</span>
           </span>
-          <span className="flex items-center justify-center gap-0.5 text-rose-700">
+          <span className="flex items-center justify-center gap-0.5 text-amber-700">
             <span>👇</span>
+            <span>{labels.box}</span>
+          </span>
+          <span className="flex items-center justify-center gap-0.5 text-rose-700">
+            <span>☝️</span>
             <span>למחוק</span>
           </span>
         </div>
@@ -227,25 +171,25 @@ export default function SwipeCardDeck({
           className="absolute inset-0 bg-white rounded-3xl border-2 border-slate-100 shadow-xl p-6 flex flex-col justify-between text-center cursor-grab active:cursor-grabbing overflow-hidden z-10"
         >
           {/* STAMP OVERLAYS */}
-          {/* Up Swipe: SAVE & EXIT (שמור שינויים ויציאה) */}
+          {/* Up Swipe: DELETE */}
           <motion.div
             style={{ opacity: upStampOpacity }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-indigo-500 bg-indigo-50/95 text-indigo-700 px-5 py-2.5 rounded-2xl font-black text-2xl tracking-wider shadow-2xl transform rotate-3 pointer-events-none z-20 flex items-center gap-2 whitespace-nowrap"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-rose-500 bg-rose-50/95 text-rose-600 px-6 py-2 rounded-2xl font-black text-3xl tracking-wider shadow-2xl transform -rotate-6 pointer-events-none z-20 flex items-center gap-2"
           >
-            <Save className="w-7 h-7 stroke-[2.5]" />
-            <span>שמור ויציאה!</span>
+            <Trash2 className="w-8 h-8 stroke-[3]" />
+            <span>למחוק!</span>
           </motion.div>
 
-          {/* Right Swipe: VALID / APPROVED (תקין) */}
+          {/* Right Swipe: OK */}
           <motion.div
             style={{ opacity: rightStampOpacity }}
-            className="absolute top-6 right-6 border-4 border-emerald-500 bg-emerald-50/95 text-emerald-600 px-4 py-1.5 rounded-2xl font-black text-2xl tracking-wider shadow-lg transform rotate-12 pointer-events-none z-20 flex items-center gap-1.5"
+            className="absolute top-6 right-6 border-4 border-emerald-500 bg-emerald-50/95 text-emerald-600 px-4 py-1.5 rounded-2xl font-black text-2xl tracking-wider shadow-lg transform rotate-12 pointer-events-none z-20 flex items-center gap-1.5 whitespace-nowrap"
           >
             <Check className="w-6 h-6 stroke-[3]" />
-            <span>תקין!</span>
+            <span>{labels.ok}</span>
           </motion.div>
 
-          {/* Left Swipe: EDIT / FIX (לתקן) */}
+          {/* Left Swipe: EDIT */}
           <motion.div
             style={{ opacity: leftStampOpacity }}
             className="absolute top-6 left-6 border-4 border-blue-500 bg-blue-50/95 text-blue-600 px-4 py-1.5 rounded-2xl font-black text-2xl tracking-wider shadow-lg transform -rotate-12 pointer-events-none z-20 flex items-center gap-1.5"
@@ -254,13 +198,13 @@ export default function SwipeCardDeck({
             <span>לתקן</span>
           </motion.div>
 
-          {/* Down Swipe: DELETE (למחוק) */}
+          {/* Down Swipe: INTO THE BOX */}
           <motion.div
             style={{ opacity: downStampOpacity }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-rose-500 bg-rose-50/95 text-rose-600 px-6 py-2 rounded-2xl font-black text-3xl tracking-wider shadow-2xl transform -rotate-6 pointer-events-none z-20 flex items-center gap-2"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 border-4 border-amber-500 bg-amber-50/95 text-amber-700 px-5 py-2.5 rounded-2xl font-black text-2xl tracking-wider shadow-2xl transform rotate-3 pointer-events-none z-20 flex items-center gap-2 whitespace-nowrap"
           >
-            <Trash2 className="w-8 h-8 stroke-[3]" />
-            <span>למחוק!</span>
+            <Package className="w-7 h-7 stroke-[2.5]" />
+            <span>{labels.box}</span>
           </motion.div>
 
           {/* Top Card Header */}
@@ -269,8 +213,7 @@ export default function SwipeCardDeck({
               {currentIndex + 1} מתוך {totalCount}
             </span>
             <span className="text-xs text-slate-400 flex items-center gap-1">
-              <Smartphone className="w-3.5 h-3.5 text-blue-500" />
-              <span>החלק כרטיסייה</span>
+              {stage === 'unboxing' ? <><Package className="w-3.5 h-3.5 text-amber-500" /><span>פותחים את הקופסה</span></> : <span>מיון</span>}
             </span>
           </div>
 
@@ -293,7 +236,10 @@ export default function SwipeCardDeck({
                     rel="noopener noreferrer"
                     draggable={false}
                     // A drag that ends over the number must not open WhatsApp
-                    onClick={e => { if (Math.abs(x.get()) > 5 || Math.abs(y.get()) > 5) e.preventDefault(); }}
+                    onClick={e => {
+                      if (Math.abs(x.get()) > 5 || Math.abs(y.get()) > 5) e.preventDefault();
+                      else onWhatsAppOpen?.();
+                    }}
                     title="פתח צ'אט בוואטסאפ כדי לזהות את איש הקשר"
                     className="flex items-center justify-center gap-2 text-slate-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 py-1.5 px-3 rounded-xl text-base font-mono font-medium transition"
                     dir="ltr"
@@ -319,6 +265,13 @@ export default function SwipeCardDeck({
                 </div>
               )}
 
+              {currentContact.note && (
+                <div className="flex items-start justify-center gap-1.5 text-xs text-slate-600 bg-amber-50/60 py-1.5 px-3 rounded-xl">
+                  <StickyNote className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                  <span className="line-clamp-2 text-right">{currentContact.note}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-center gap-1.5 text-xs text-slate-500 pt-1">
                 <Tag className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                 <span className="truncate">{getGroupNames(currentContact)}</span>
@@ -328,17 +281,16 @@ export default function SwipeCardDeck({
 
           {/* Card Footer Cue */}
           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-            <span>👈 שמאלה: לתקן</span>
-            <span className="text-indigo-600 font-medium">☝️ למעלה: שמור וצא</span>
-            <span className="text-rose-400 font-medium">👇 למטה: למחוק</span>
-            <span>👉 ימינה: תקין</span>
+            <span>👈 לתקן</span>
+            <span className="text-rose-400 font-medium">☝️ למחוק</span>
+            <span className="text-amber-600 font-medium">👇 {labels.box}</span>
+            <span>👉 {labels.ok}</span>
           </div>
         </motion.div>
       </div>
 
-      {/* Tinder-Style Bottom Floating Action Buttons */}
+      {/* Bottom Floating Action Buttons */}
       <div className="flex items-center justify-center gap-3.5 w-full mt-4 pb-2">
-        {/* Undo button */}
         {canUndo && onUndo && (
           <button
             onClick={onUndo}
@@ -349,57 +301,49 @@ export default function SwipeCardDeck({
           </button>
         )}
 
-        {/* Delete (Down swipe) */}
-        <div className="flex flex-col items-center gap-1">
-          <button
-            onClick={triggerDelete}
-            title="מחק איש קשר (החלקה למטה)"
-            className="w-14 h-14 bg-white hover:bg-rose-50 active:scale-90 text-rose-500 rounded-full flex items-center justify-center shadow-md border-2 border-rose-200 transition hover:border-rose-400"
-          >
-            <Trash2 className="w-7 h-7 stroke-[2.2]" />
-          </button>
-          <span className="text-[10px] font-semibold text-rose-600">מחק (למטה)</span>
-        </div>
-
-        {/* Save and Exit (Up swipe) */}
-        {onSaveAndExit && (
-          <div className="flex flex-col items-center gap-1">
-            <button
-              onClick={triggerSaveAndExit}
-              title="שמור שינויים ויציאה (החלקה למעלה)"
-              className="w-12 h-12 bg-white hover:bg-indigo-50 active:scale-90 text-indigo-600 rounded-full flex items-center justify-center shadow-md border-2 border-indigo-200 transition hover:border-indigo-400"
-            >
-              <Save className="w-5 h-5 stroke-[2.2]" />
-            </button>
-            <span className="text-[10px] font-semibold text-indigo-600">שמור וצא (למעלה)</span>
-          </div>
-        )}
-
-        {/* Edit (Left swipe) */}
-        <div className="flex flex-col items-center gap-1">
-          <button
-            onClick={triggerEdit}
-            title="ערוך פרטים (החלקה שמאלה)"
-            className="w-12 h-12 bg-white hover:bg-blue-50 active:scale-90 text-blue-600 rounded-full flex items-center justify-center shadow-md border-2 border-blue-200 transition hover:border-blue-400"
-          >
-            <Edit3 className="w-5 h-5 stroke-[2.2]" />
-          </button>
-          <span className="text-[10px] font-semibold text-blue-600">תקן (שמאלה)</span>
-        </div>
-
-        {/* Approve / Valid (Right swipe) */}
-        <div className="flex flex-col items-center gap-1">
-          <button
-            onClick={triggerApprove}
-            title="איש קשר תקין (החלקה ימינה)"
-            className="w-14 h-14 bg-white hover:bg-emerald-50 active:scale-90 text-emerald-600 rounded-full flex items-center justify-center shadow-md border-2 border-emerald-200 transition hover:border-emerald-400"
-          >
-            <Check className="w-7 h-7 stroke-[3]" />
-          </button>
-          <span className="text-[10px] font-semibold text-emerald-600">תקין (ימינה)</span>
-        </div>
+        <ActionButton onClick={triggerDelete} title="מחק איש קשר (החלקה למעלה)" label="מחק (למעלה)" color="rose" size="sm">
+          <Trash2 className="w-5 h-5 stroke-[2.2]" />
+        </ActionButton>
+        <ActionButton onClick={triggerBox} title={`${labels.box} (החלקה למטה)`} label={`${labels.box} (למטה)`} color="amber" size="lg">
+          <Package className="w-7 h-7 stroke-[2.2]" />
+        </ActionButton>
+        <ActionButton onClick={triggerEdit} title="ערוך פרטים (החלקה שמאלה)" label="תקן (שמאלה)" color="blue" size="sm">
+          <Edit3 className="w-5 h-5 stroke-[2.2]" />
+        </ActionButton>
+        <ActionButton onClick={triggerOk} title={`${labels.ok} (החלקה ימינה)`} label={`${labels.ok} (ימינה)`} color="emerald" size="lg">
+          <Check className="w-7 h-7 stroke-[3]" />
+        </ActionButton>
       </div>
     </div>
   );
 }
 
+const BUTTON_COLORS = {
+  rose: 'hover:bg-rose-50 text-rose-500 border-rose-200 hover:border-rose-400',
+  amber: 'hover:bg-amber-50 text-amber-600 border-amber-200 hover:border-amber-400',
+  blue: 'hover:bg-blue-50 text-blue-600 border-blue-200 hover:border-blue-400',
+  emerald: 'hover:bg-emerald-50 text-emerald-600 border-emerald-200 hover:border-emerald-400',
+};
+const LABEL_COLORS = { rose: 'text-rose-600', amber: 'text-amber-700', blue: 'text-blue-600', emerald: 'text-emerald-600' };
+
+function ActionButton({ onClick, title, label, color, size, children }: {
+  onClick: () => void;
+  title: string;
+  label: string;
+  color: keyof typeof BUTTON_COLORS;
+  size: 'sm' | 'lg';
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        onClick={onClick}
+        title={title}
+        className={`${size === 'lg' ? 'w-14 h-14' : 'w-12 h-12'} bg-white active:scale-90 rounded-full flex items-center justify-center shadow-md border-2 transition ${BUTTON_COLORS[color]}`}
+      >
+        {children}
+      </button>
+      <span className={`text-[10px] font-semibold ${LABEL_COLORS[color]}`}>{label}</span>
+    </div>
+  );
+}
