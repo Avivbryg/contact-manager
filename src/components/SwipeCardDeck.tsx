@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, useMotionValue, useTransform, animate, MotionValue } from 'motion/react';
 import { GoogleContact, ContactGroup } from '../lib/contacts';
 import { Stage } from '../lib/session';
-import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Package, MessageCircle, StickyNote } from 'lucide-react';
+import { Check, Edit3, Trash2, RotateCcw, Phone, Mail, Tag, Package, MessageCircle, StickyNote, Briefcase } from 'lucide-react';
 import { whatsAppUrl } from '../lib/phone';
 
 interface SwipeCardDeckProps {
@@ -223,9 +223,15 @@ export default function SwipeCardDeck({
               {initial}
             </div>
 
-            <h3 className="text-2xl font-bold text-slate-800 mb-2 px-2 line-clamp-1">
+            <h3 className="text-2xl font-bold text-slate-800 mb-1 px-2 line-clamp-1">
               {fullName}
             </h3>
+            {(currentContact.company || currentContact.jobTitle) && (
+              <div className="flex items-center justify-center gap-1.5 text-sm text-slate-500 mb-2 px-2">
+                <Briefcase className="w-4 h-4 text-slate-400 shrink-0" />
+                <span className="line-clamp-1">{[currentContact.jobTitle, currentContact.company].filter(Boolean).join(' · ')}</span>
+              </div>
+            )}
 
             <div className="space-y-1.5 w-full max-w-[260px]">
               {currentContact.phone ? (

@@ -23,12 +23,21 @@ export interface GoogleContact {
   email: string;
   // Google Contacts "Notes" field (the first biography)
   note: string;
+  // First organization
+  company: string;
+  jobTitle: string;
+  // "D/M/YYYY", or "D/M" when Google has no year
+  birthday: string;
+  // First address, as Google formats it
+  address: string;
   memberships: string[];
   // Original People API fields, kept so updates don't drop data we don't display
   raw: {
     names: any[];
     phoneNumbers: any[];
     emailAddresses: any[];
+    organizations: any[];
+    addresses: any[];
   };
 }
 
@@ -38,7 +47,28 @@ export interface ContactEdit {
   phone?: string;
   email?: string;
   note?: string;
+  company?: string;
+  jobTitle?: string;
+  birthday?: string;
+  address?: string;
 }
+
+/** Parses "D/M" or "D/M/YYYY" (also with . or -). Returns null for anything else. */
+export function parseBirthday(text: string): { day: number; month: number; year?: number } | null {
+  const match = text.trim().match(/^(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{4}))?$/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = match[3] ? Number(match[3]) : undefined;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return year ? { day, month, year } : { day, month };
+}
+
+const formatBirthday = (birthday: any): string => {
+  const date = birthday?.date;
+  if (!date?.month || !date?.day) return birthday?.text || '';
+  return `${date.day}/${date.month}${date.year ? `/${date.year}` : ''}`;
+};
 
 const toContactGroup = (group: any): ContactGroup => ({
   resourceName: group.resourceName,
@@ -78,7 +108,7 @@ export async function createContactGroup(name: string): Promise<ContactGroup> {
   return toContactGroup(await res.json());
 }
 
-const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,memberships,biographies';
+const PERSON_FIELDS = 'names,emailAddresses,phoneNumbers,memberships,biographies,organizations,birthdays,addresses';
 
 const toGoogleContact = (person: any): GoogleContact => {
   const nameObj = person.names?.[0] || {};
@@ -90,13 +120,19 @@ const toGoogleContact = (person: any): GoogleContact => {
     phone: person.phoneNumbers?.[0]?.value || '',
     email: person.emailAddresses?.[0]?.value || '',
     note: person.biographies?.[0]?.value || '',
+    company: person.organizations?.[0]?.name || '',
+    jobTitle: person.organizations?.[0]?.title || '',
+    birthday: formatBirthday(person.birthdays?.[0]),
+    address: person.addresses?.[0]?.formattedValue || '',
     memberships: (person.memberships || [])
       .filter((m: any) => m.contactGroupMembership)
       .map((m: any) => m.contactGroupMembership.contactGroupResourceName),
     raw: {
       names: person.names || [],
       phoneNumbers: person.phoneNumbers || [],
-      emailAddresses: person.emailAddresses || []
+      emailAddresses: person.emailAddresses || [],
+      organizations: person.organizations || [],
+      addresses: person.addresses || []
     }
   };
 };
@@ -147,6 +183,10 @@ export function buildContactUpdate(contact: GoogleContact, edit: ContactEdit) {
   const phone = (edit.phone ?? contact.phone).trim();
   const email = (edit.email ?? contact.email).trim();
   const note = (edit.note ?? contact.note).trim();
+  const company = (edit.company ?? contact.company).trim();
+  const jobTitle = (edit.jobTitle ?? contact.jobTitle).trim();
+  const birthday = (edit.birthday ?? contact.birthday).trim();
+  const address = (edit.address ?? contact.address).trim();
 
   const body: Record<string, unknown> = { etag: contact.etag };
   const fields: string[] = [];
@@ -167,6 +207,25 @@ export function buildContactUpdate(contact: GoogleContact, edit: ContactEdit) {
   if (note !== contact.note) {
     body.biographies = note ? [{ value: note, contentType: 'TEXT_PLAIN' }] : [];
     fields.push('biographies');
+  }
+  if (company !== contact.company || jobTitle !== contact.jobTitle) {
+    // Keep department, dates etc. of the first organization, and any other organizations
+    const [first = {}, ...others] = contact.raw.organizations.map(({ metadata, formattedType, ...rest }) => rest);
+    const updated = { ...first, name: company || undefined, title: jobTitle || undefined };
+    body.organizations = company || jobTitle ? [updated, ...others] : others;
+    fields.push('organizations');
+  }
+  if (birthday !== contact.birthday) {
+    const parsed = parseBirthday(birthday);
+    if (birthday && !parsed) throw new Error(`Invalid birthday: ${birthday}`);
+    body.birthdays = parsed ? [{ date: parsed }] : [];
+    fields.push('birthdays');
+  }
+  if (address !== contact.address) {
+    // A typed address replaces the structured one (street, city...), which would otherwise go stale
+    const [first, ...others] = contact.raw.addresses.map(({ metadata, formattedType, ...rest }) => rest);
+    body.addresses = address ? [{ formattedValue: address, type: first?.type }, ...others] : others;
+    fields.push('addresses');
   }
 
   return { body, updatePersonFields: fields.join(',') };

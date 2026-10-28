@@ -26,8 +26,10 @@ import {
   saveWhatsAppPending,
 } from '../lib/session';
 import { whatsAppUrl } from '../lib/phone';
-import { RefreshCw, CheckCircle, Edit3, Trash2, Sparkles, Users, Smartphone, AlertTriangle, MessageCircle, Package, LogOut, StickyNote, Loader2 } from 'lucide-react';
+import { RefreshCw, CheckCircle, Edit3, Trash2, Sparkles, Users, Smartphone, AlertTriangle, MessageCircle, Package, LogOut, StickyNote, Loader2, Briefcase } from 'lucide-react';
 import SwipeCardDeck, { STAGE_LABELS } from './SwipeCardDeck';
+import ContactEditor, { ContactDraft } from './ContactEditor';
+import { knownCompanies } from '../lib/company';
 
 const ContactsChart = lazy(() => import('./ContactsChart'));
 
@@ -36,7 +38,6 @@ export const BOX_NAME = "📦 פיצ'יפקעס";
 const DELETE_UNDO_MS = 4000;
 const EMPTY_STATS: SessionStats = { ok: 0, boxed: 0, edited: 0, deleted: 0 };
 
-type ContactDraft = Partial<GoogleContact> & { contactGroupId?: string };
 
 interface HistoryEntry {
   index: number;
@@ -123,9 +124,6 @@ export default function PhoneContacts() {
     return true;
   });
 
-  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
-  const [isCreatingGroupLoading, setIsCreatingGroupLoading] = useState(false);
   const [showChart, setShowChart] = useState(true);
 
   const userGroups = useMemo(
@@ -135,6 +133,7 @@ export default function PhoneContacts() {
   const userGroupIds = useMemo(() => userGroupIdSet(contactGroups), [contactGroups]);
   const boxGroup = useMemo(() => findBox(contactGroups), [contactGroups]);
   const contactsByRn = useMemo(() => new Map(contacts.map(c => [c.resourceName, c])), [contacts]);
+  const companies = useMemo(() => knownCompanies(contacts), [contacts]);
 
   const sortingCount = useMemo(
     () => contacts.filter(c => qualifiesFor('sorting', c, userGroupIds)).length,
@@ -360,7 +359,13 @@ export default function PhoneContacts() {
   const closeEditor = () => {
     setEditing(false);
     setDraft(null);
-    setIsCreatingGroup(false);
+  };
+
+  const handleCreateGroup = async (name: string) => {
+    const created = await createContactGroup(name);
+    const group = { ...created, groupType: created.groupType || 'USER_CONTACT_GROUP' };
+    setContactGroups(prev => [...prev, group]);
+    return group;
   };
 
   const handleSaveEdit = () => {
@@ -381,6 +386,10 @@ export default function PhoneContacts() {
         phone: draft.phone ?? c.phone,
         email: draft.email ?? c.email,
         note: draft.note ?? c.note,
+        company: draft.company?.trim() ?? c.company,
+        jobTitle: draft.jobTitle?.trim() ?? c.jobTitle,
+        birthday: draft.birthday?.trim() ?? c.birthday,
+        address: draft.address?.trim() ?? c.address,
         memberships
       };
     });
@@ -652,106 +661,17 @@ export default function PhoneContacts() {
 
         <div className="flex-1 flex flex-col min-h-0">
           {editing ? (
-            <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 flex flex-col flex-1">
-              <h3 className="text-lg font-bold text-slate-800 mb-4 text-center">עריכת פרטי איש קשר</h3>
-              <div className="flex-1 space-y-3 overflow-y-auto px-1 pb-4">
-                  <input
-                  className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition"
-                  value={draft?.firstName || ''}
-                  onChange={e => setDraft({...draft, firstName: e.target.value})}
-                  placeholder="שם פרטי"
-                  />
-                  <input
-                  className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition"
-                  value={draft?.lastName || ''}
-                  onChange={e => setDraft({...draft, lastName: e.target.value})}
-                  placeholder="שם משפחה"
-                  />
-                  <input
-                  className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition text-right"
-                  value={draft?.phone || ''}
-                  onChange={e => setDraft({...draft, phone: e.target.value})}
-                  placeholder="טלפון"
-                  dir="ltr"
-                  />
-                  <input
-                  className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition text-right"
-                  value={draft?.email || ''}
-                  onChange={e => setDraft({...draft, email: e.target.value})}
-                  placeholder="אימייל"
-                  dir="ltr"
-                  />
-                  <textarea
-                  className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition resize-none"
-                  rows={2}
-                  value={draft?.note || ''}
-                  onChange={e => setDraft({...draft, note: e.target.value})}
-                  placeholder="איך אנחנו מכירים?"
-                  />
-
-                  <div className="pb-4">
-                      <label className="block text-sm text-slate-500 mb-2 font-medium text-right">תווית (גוגל):</label>
-                      <select
-                      className="w-full border border-slate-200 px-4 py-3 rounded-xl bg-white outline-none focus:ring-2 focus:ring-blue-500"
-                      value={draft?.contactGroupId || ''}
-                      onChange={e => {
-                          setIsCreatingGroup(e.target.value === 'new');
-                          setDraft({...draft, contactGroupId: e.target.value});
-                      }}
-                      >
-                      <option value="">ללא תווית</option>
-                      {userGroups.map(group => (
-                          <option key={group.resourceName} value={group.resourceName}>{group.formattedName}</option>
-                      ))}
-                      <option value="new">אחר (צור תווית חדשה)...</option>
-                      </select>
-
-                      {isCreatingGroup && (
-                          <div className="mt-3 flex gap-2">
-                              <input
-                                  className="flex-1 border border-slate-200 px-4 py-3 rounded-xl bg-slate-50 outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 transition"
-                                  placeholder="שם התווית החדשה"
-                                  value={newGroupName}
-                                  onChange={e => setNewGroupName(e.target.value)}
-                                  autoFocus
-                              />
-                              <button
-                                  disabled={!newGroupName.trim() || isCreatingGroupLoading}
-                                  onClick={async () => {
-                                      try {
-                                          setIsCreatingGroupLoading(true);
-                                          const newGroup = await createContactGroup(newGroupName.trim());
-                                          setContactGroups(prev => [...prev, { ...newGroup, groupType: newGroup.groupType || 'USER_CONTACT_GROUP' }]);
-                                          setDraft({...draft, contactGroupId: newGroup.resourceName});
-                                          setIsCreatingGroup(false);
-                                          setNewGroupName('');
-                                      } catch(e) {
-                                          alert('שגיאה ביצירת תווית');
-                                      } finally {
-                                          setIsCreatingGroupLoading(false);
-                                      }
-                                  }}
-                                  className="px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-medium transition flex items-center justify-center min-w-[80px]"
-                              >
-                                  {isCreatingGroupLoading ? <RefreshCw className="animate-spin w-5 h-5"/> : 'שמור'}
-                              </button>
-                          </div>
-                      )}
-                  </div>
-              </div>
-
-              <div className="flex gap-3 pt-2 shrink-0 mt-auto">
-                <button
-                  disabled={isCreatingGroup || draft?.contactGroupId === 'new'}
-                  onClick={handleSaveEdit}
-                  className="flex-1 bg-slate-900 disabled:opacity-50 text-white rounded-xl py-3.5 font-bold transition hover:bg-slate-800"
-                >שמור והמשך</button>
-                <button
-                  onClick={closeEditor}
-                  className="flex-none px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl py-3.5 font-medium transition"
-                >ביטול</button>
-              </div>
-            </div>
+            <ContactEditor
+              draft={draft || {}}
+              onChange={setDraft}
+              userGroups={userGroups}
+              companies={companies}
+              settings={settings}
+              onSettingsChange={setSettings}
+              onCreateGroup={handleCreateGroup}
+              onSave={handleSaveEdit}
+              onCancel={closeEditor}
+            />
           ) : isPhoneMode ? (
             <SwipeCardDeck
               currentContact={current}
@@ -777,7 +697,13 @@ export default function PhoneContacts() {
                     <div className="w-24 h-24 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-4xl font-bold mx-auto mb-6">
                     {current.firstName?.[0] || current.lastName?.[0] || '?'}
                     </div>
-                    <h3 className="text-3xl font-bold text-slate-800 mb-2">{current.firstName} {current.lastName}</h3>
+                    <h3 className="text-3xl font-bold text-slate-800 mb-1">{current.firstName} {current.lastName}</h3>
+                    {(current.company || current.jobTitle) && (
+                        <div className="flex items-center gap-1.5 text-slate-500 mb-2">
+                            <Briefcase className="w-4 h-4 text-slate-400" />
+                            {[current.jobTitle, current.company].filter(Boolean).join(' · ')}
+                        </div>
+                    )}
                     {currentWhatsApp ? (
                         <a
                             href={currentWhatsApp}

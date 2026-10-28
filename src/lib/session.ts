@@ -26,6 +26,10 @@ const WHATSAPP_KEY = 'whatsapp-pending';
 
 export interface Settings {
   confirmDelete: boolean;
+  // Extra fields on the edit page (name, phone, company, title and note are always shown)
+  showEmail: boolean;
+  showBirthday: boolean;
+  showAddress: boolean;
 }
 
 const read = <T,>(key: string): T | null => {
@@ -48,7 +52,13 @@ const write = (key: string, value: unknown) => {
 export const loadSession = () => read<SortSession>(SESSION_KEY);
 export const saveSession = (session: SortSession | null) => write(SESSION_KEY, session);
 
-export const loadSettings = (): Settings => ({ confirmDelete: false, ...read<Settings>(SETTINGS_KEY) });
+export const loadSettings = (): Settings => ({
+  confirmDelete: false,
+  showEmail: false,
+  showBirthday: false,
+  showAddress: false,
+  ...read<Settings>(SETTINGS_KEY)
+});
 export const saveSettings = (settings: Settings) => write(SETTINGS_KEY, settings);
 
 /** The contact whose WhatsApp chat was opened, so we can ask "who's this?" on return. */
